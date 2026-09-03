@@ -5,6 +5,7 @@ import static com.antithesis.springhegel.user.EmailPasswordGenerators.invalidPas
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.randomizeCase;
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.validEmails;
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.validPasswords;
+import static com.antithesis.springhegel.user.ServiceFixture.ENCODER;
 import static dev.hegel.Generators.integers;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,26 +20,12 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 
 class UserServicePropertyTest {
 
-    // Low strength keeps the many Hegel draws fast; the production strength is configured in PasswordConfig.
-    private static final PasswordEncoder ENCODER = new BCryptPasswordEncoder(4);
-
-    private record Fixture(InMemoryUserRepository repository, UserService service) {
-
-        static Fixture fresh() {
-            InMemoryUserRepository repository = new InMemoryUserRepository();
-            return new Fixture(repository,
-                    new UserServiceImpl(repository, new RegistrationValidator(), ENCODER));
-        }
-    }
-
     @HegelTest
     void validInputRegistersTheNormalizedUser(TestCase tc) {
-        Fixture fixture = Fixture.fresh();
+        ServiceFixture fixture = ServiceFixture.fresh();
         String email = tc.draw(validEmails(), "email");
         String password = tc.draw(validPasswords(), "password");
 
@@ -51,7 +38,7 @@ class UserServicePropertyTest {
 
     @HegelTest
     void registeredUserIsPersistedWithAHashedPassword(TestCase tc) {
-        Fixture fixture = Fixture.fresh();
+        ServiceFixture fixture = ServiceFixture.fresh();
         String email = tc.draw(validEmails(), "email");
         String password = tc.draw(validPasswords(), "password");
 
@@ -68,8 +55,19 @@ class UserServicePropertyTest {
     }
 
     @HegelTest
+    void registeredUserCreatedAtComesFromTheClock(TestCase tc) {
+        ServiceFixture fixture = ServiceFixture.fresh();
+        String email = tc.draw(validEmails(), "email");
+        String password = tc.draw(validPasswords(), "password");
+
+        fixture.service().register(email, password);
+
+        assertEquals(fixture.clock().instant(), fixture.repository().findByEmail(email).get().getCreatedAt());
+    }
+
+    @HegelTest
     void registeringAnyVariantOfARegisteredEmailConflicts(TestCase tc) {
-        Fixture fixture = Fixture.fresh();
+        ServiceFixture fixture = ServiceFixture.fresh();
         String email = tc.draw(validEmails(), "email");
         String password = tc.draw(validPasswords(), "password");
         String variant = " ".repeat(tc.draw(integers().min(0).max(3), "leading"))
@@ -86,7 +84,7 @@ class UserServicePropertyTest {
 
     @HegelTest
     void invalidInputIsRejectedAndNothingIsStored(TestCase tc) {
-        Fixture fixture = Fixture.fresh();
+        ServiceFixture fixture = ServiceFixture.fresh();
         String validEmail = tc.draw(validEmails(), "validEmail");
         String validPassword = tc.draw(validPasswords(), "validPassword");
         String invalidEmail = tc.draw(invalidEmails(), "invalidEmail");
@@ -104,7 +102,7 @@ class UserServicePropertyTest {
 
     @HegelTest
     void surroundingWhitespaceIsTrimmedBeforeRegistration(TestCase tc) {
-        Fixture fixture = Fixture.fresh();
+        ServiceFixture fixture = ServiceFixture.fresh();
         String email = tc.draw(validEmails(), "email");
         String password = tc.draw(validPasswords(), "password");
         String paddedEmail = pad(tc, email);
@@ -141,8 +139,13 @@ class UserServicePropertyTest {
                 return Optional.empty();
             }
         };
-        UserService service =
-                new UserServiceImpl(racingRepository, new RegistrationValidator(), ENCODER);
+        UserService service = new UserServiceImpl(
+                racingRepository,
+                new InMemorySessionRepository(),
+                new RegistrationValidator(),
+                ENCODER,
+                new SessionTokenGenerator(),
+                new MutableClock(ServiceFixture.START));
 
         assertThrows(EmailAlreadyRegisteredException.class,
                 () -> service.register("race@example.com", "Str0ng!pass"));
@@ -151,7 +154,7 @@ class UserServicePropertyTest {
     @Test
     void nullEmailIsRejected() {
         InvalidRegistrationException ex = assertThrows(InvalidRegistrationException.class,
-                () -> Fixture.fresh().service().register(null, "Str0ng!pass"));
+                () -> ServiceFixture.fresh().service().register(null, "Str0ng!pass"));
 
         assertEquals(List.of("Email must not be blank"), ex.getErrors());
     }
@@ -159,7 +162,7 @@ class UserServicePropertyTest {
     @Test
     void nullPasswordIsRejected() {
         InvalidRegistrationException ex = assertThrows(InvalidRegistrationException.class,
-                () -> Fixture.fresh().service().register("someone@example.com", null));
+                () -> ServiceFixture.fresh().service().register("someone@example.com", null));
 
         assertEquals(List.of("Password must not be blank"), ex.getErrors());
     }

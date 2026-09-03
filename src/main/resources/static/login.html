@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 4rem auto; padding: 0 1rem; color: #222; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input { width: 100%; padding: .5rem; margin-top: .25rem; font-size: 1rem; box-sizing: border-box; }
+    button { margin-top: 1.5rem; padding: .6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+    #errors { color: #b00020; margin-top: 1rem; padding-left: 1.2rem; }
+    #logged-in { color: #1b5e20; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Log in to your account</h1>
+
+  <p id="loading">Checking your session…</p>
+
+  <form id="login-form" novalidate hidden>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="email">
+
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password">
+
+    <button type="submit">Log in</button>
+    <ul id="errors" hidden></ul>
+    <p>Don't have an account? <a href="register.html">Register</a></p>
+  </form>
+
+  <section id="logged-in" hidden>
+    <h2>You are logged in</h2>
+    <p>Logged in as <strong id="current-email"></strong>.</p>
+    <button id="logout-button" type="button">Log out</button>
+  </section>
+
+  <script>
+    const loading = document.getElementById('loading');
+    const form = document.getElementById('login-form');
+    const errors = document.getElementById('errors');
+    const loggedIn = document.getElementById('logged-in');
+    const currentEmail = document.getElementById('current-email');
+
+    async function refreshState() {
+      try {
+        const response = await fetch('/api/session');
+        if (response.status === 200) {
+          const user = await response.json();
+          showLoggedIn(user.email);
+          return;
+        }
+      } catch (networkError) {
+        // fall through to the logged-out view
+      }
+      showLoggedOut();
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errors.hidden = true;
+      errors.replaceChildren();
+
+      const body = {
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+      };
+
+      let response;
+      try {
+        response = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } catch (networkError) {
+        showErrors(['Could not reach the server. Please try again.']);
+        return;
+      }
+
+      if (response.ok) {
+        const user = await response.json();
+        form.reset();
+        showLoggedIn(user.email);
+        return;
+      }
+
+      let messages = ['Login failed.'];
+      try {
+        const error = await response.json();
+        if (Array.isArray(error.messages) && error.messages.length > 0) {
+          messages = error.messages;
+        }
+      } catch (parseError) {
+        // keep the generic message
+      }
+      showErrors(messages);
+    });
+
+    document.getElementById('logout-button').addEventListener('click', async () => {
+      try {
+        await fetch('/api/session', { method: 'DELETE' });
+      } catch (networkError) {
+        // the cookie may still be set, but the page can only show the logged-out view
+      }
+      showLoggedOut();
+    });
+
+    function showLoggedIn(email) {
+      currentEmail.textContent = email;
+      loading.hidden = true;
+      form.hidden = true;
+      loggedIn.hidden = false;
+    }
+
+    function showLoggedOut() {
+      loading.hidden = true;
+      loggedIn.hidden = true;
+      form.hidden = false;
+    }
+
+    function showErrors(messages) {
+      errors.replaceChildren(...messages.map((message) => {
+        const item = document.createElement('li');
+        item.textContent = message;
+        return item;
+      }));
+      errors.hidden = false;
+    }
+
+    refreshState();
+  </script>
+</body>
+</html>

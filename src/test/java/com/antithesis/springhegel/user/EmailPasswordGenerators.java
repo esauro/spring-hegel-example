@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
 
-/** Hegel generators and helpers shared by the registration property tests. */
+/** Hegel generators and helpers shared by the registration and login property tests. */
 final class EmailPasswordGenerators {
 
     static final String UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -27,6 +27,11 @@ final class EmailPasswordGenerators {
             .toString();
 
     private EmailPasswordGenerators() {
+    }
+
+    /** Strings with the exact shape of a real session token (43 Base64-URL characters) but never issued. */
+    static Generator<String> tokensLike() {
+        return fromRegex("[A-Za-z0-9_-]{43}").fullmatch(true);
     }
 
     static Generator<String> validEmails() {

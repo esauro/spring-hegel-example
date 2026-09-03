@@ -20,7 +20,11 @@ Once the app is running, open the registration page at:
 
 **http://localhost:8080/register.html**
 
-The page calls the REST API at `POST /api/users`. The database is in-memory H2, so registered users are lost when the app restarts.
+The page calls the REST API at `POST /api/users`. Once registered, log in at:
+
+**http://localhost:8080/login.html**
+
+The login page calls `POST`/`GET`/`DELETE /api/session`; the session travels in an HttpOnly `SESSION` cookie that references a server-side session record. The database is in-memory H2, so registered users and sessions are lost when the app restarts.
 
 ## Project layout
 
@@ -40,6 +44,7 @@ The domain package (`com.antithesis.springhegel.user`) is held to **100% line an
 - **Rules live in a pure component.** `RegistrationValidator` has no dependencies and no side effects, so its Hegel properties are plain method calls: generate an email/password, call `validate`, assert on the returned messages. Every rule (blank, length, format, character classes, printable ASCII) has its own property so each branch is exercised on every run, whatever Hegel happens to draw.
 - **The repository contract is deliberately narrow.** `UserRepository` extends Spring Data's bare `Repository` marker and declares only `save`, `existsByEmail` and `findByEmail`. Spring Data implements it at runtime; in tests a 30-line `InMemoryUserRepository` implements it by hand.
 - **A fresh fake per draw.** `@HegelTest` re-runs a test body many times. Sharing a Spring context and an H2 database across those runs would let one draw's user collide with the next (the uniqueness rule makes this especially likely). The service properties therefore build a new fake repository and a new service inside each test body, with no Spring context at all, and use a low-strength `BCryptPasswordEncoder(4)` to keep the many draws fast.
+- **Sessions follow the same recipe.** Login sessions live behind a second narrow repository (`SessionRepository`, three methods) with its own hand-written in-memory fake. Time comes from an injected `java.time.Clock`, so session expiry is a deterministic property rather than a flaky sleep, and the login/logout/query state machine is checked with a model-based Hegel property that replays random action sequences against a tiny set of "live tokens".
 - **Example tests only where there is no input space.** The concurrent-registration race (`save` throwing a constraint violation), null inputs, and the HTTP wiring (`RegistrationApiTest`, using MockMvc against the real H2) are plain JUnit tests, as allowed by the project conventions.
 
 The recipe transfers to any Spring service: keep business rules in pure classes, keep data-access interfaces small enough to fake, and never let a property test depend on state that survives between draws.
