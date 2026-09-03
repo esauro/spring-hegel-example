@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 4rem auto; padding: 0 1rem; color: #222; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input { width: 100%; padding: .5rem; margin-top: .25rem; font-size: 1rem; box-sizing: border-box; }
+    button { margin-top: 1.5rem; padding: .6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+    #errors { color: #b00020; margin-top: 1rem; padding-left: 1.2rem; }
+    #success { color: #1b5e20; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Create your account</h1>
+
+  <form id="registration-form" novalidate>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="email">
+
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password">
+
+    <button type="submit">Register</button>
+    <ul id="errors" hidden></ul>
+  </form>
+
+  <section id="success" hidden>
+    <h2>Registration successful</h2>
+    <p>Welcome, <strong id="registered-email"></strong>. Your account has been created.</p>
+  </section>
+
+  <script>
+    const form = document.getElementById('registration-form');
+    const errors = document.getElementById('errors');
+    const success = document.getElementById('success');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errors.hidden = true;
+      errors.replaceChildren();
+
+      const body = {
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+      };
+
+      let response;
+      try {
+        response = await fetch('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } catch (networkError) {
+        showErrors(['Could not reach the server. Please try again.']);
+        return;
+      }
+
+      if (response.ok) {
+        const user = await response.json();
+        document.getElementById('registered-email').textContent = user.email;
+        form.hidden = true;
+        success.hidden = false;
+        return;
+      }
+
+      let messages = ['Registration failed.'];
+      try {
+        const error = await response.json();
+        if (Array.isArray(error.messages) && error.messages.length > 0) {
+          messages = error.messages;
+        }
+      } catch (parseError) {
+        // keep the generic message
+      }
+      showErrors(messages);
+    });
+
+    function showErrors(messages) {
+      errors.replaceChildren(...messages.map((message) => {
+        const item = document.createElement('li');
+        item.textContent = message;
+        return item;
+      }));
+      errors.hidden = false;
+    }
+  </script>
+</body>
+</html>
