@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 /** Hegel generators and helpers shared by the registration and login property tests. */
-final class EmailPasswordGenerators {
+public final class EmailPasswordGenerators {
 
     static final String UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     static final String LOWERCASE = "abcdefghijklmnopqrstuvwxyz";
@@ -34,7 +34,7 @@ final class EmailPasswordGenerators {
         return fromRegex("[A-Za-z0-9_-]{43}").fullmatch(true);
     }
 
-    static Generator<String> validEmails() {
+    public static Generator<String> validEmails() {
         return fromRegex("[a-z0-9._%+-]{1,20}@[a-z0-9-]{1,15}(\\.[a-z0-9-]{1,10}){1,3}").fullmatch(true);
     }
 
@@ -82,7 +82,7 @@ final class EmailPasswordGenerators {
         });
     }
 
-    static Generator<String> validPasswords() {
+    public static Generator<String> validPasswords() {
         return integers().min(8).max(32).flatMap(EmailPasswordGenerators::passwordsWithAllClasses);
     }
 
@@ -144,7 +144,7 @@ final class EmailPasswordGenerators {
     }
 
     /** Upper- or lowercases each character according to a fresh draw. */
-    static String randomizeCase(TestCase tc, String text) {
+    public static String randomizeCase(TestCase tc, String text) {
         StringBuilder result = new StringBuilder(text.length());
         for (char c : text.toCharArray()) {
             boolean upper = tc.draw(booleans(), "upper");

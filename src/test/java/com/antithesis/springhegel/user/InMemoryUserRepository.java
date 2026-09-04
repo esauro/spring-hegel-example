@@ -35,6 +35,11 @@ final class InMemoryUserRepository implements UserRepository {
         return Optional.ofNullable(byEmail.get(email));
     }
 
+    @Override
+    public void delete(User user) {
+        byEmail.remove(user.getEmail());
+    }
+
     int size() {
         return byEmail.size();
     }

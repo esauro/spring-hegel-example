@@ -45,7 +45,7 @@ public class SessionController {
     public ResponseEntity<Void> logout(@CookieValue(name = SESSION_COOKIE, required = false) String token) {
         userService.logout(token);
         return ResponseEntity.noContent()
-                .header(HttpHeaders.SET_COOKIE, sessionCookie("").maxAge(0).build().toString())
+                .header(HttpHeaders.SET_COOKIE, clearedSessionCookie())
                 .build();
     }
 
@@ -55,6 +55,14 @@ public class SessionController {
         return userService.currentUser(token)
                 .map(user -> ResponseEntity.ok(user))
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /**
+     * Header value that makes the browser drop the session cookie; shared by logout, account
+     * deletion and the not-logged-in error.
+     */
+    static String clearedSessionCookie() {
+        return sessionCookie("").maxAge(0).build().toString();
     }
 
     private static ResponseCookie.ResponseCookieBuilder sessionCookie(String value) {

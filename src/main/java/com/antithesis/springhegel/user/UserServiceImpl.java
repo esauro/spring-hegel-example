@@ -121,6 +121,26 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public Optional<RegisteredUser> currentUser(String token) {
+        return liveSession(token)
+                .map(session -> new RegisteredUser(session.getUser().getId(), session.getUser().getEmail()));
+    }
+
+    @Override
+    @Transactional
+    public void deleteCurrentUser(String token) {
+        Session session = liveSession(token).orElseThrow(NotLoggedInException::new);
+        User owner = session.getUser();
+        // Sessions first: sessions.user_id is a not-null foreign key. The transaction makes the
+        // two deletions all-or-nothing.
+        sessionRepository.deleteAllByUser(owner);
+        userRepository.delete(owner);
+    }
+
+    /**
+     * The single definition of "logged in": the token is present, known and not expired. An
+     * expired session encountered here is deleted.
+     */
+    private Optional<Session> liveSession(String token) {
         if (token == null) {
             return Optional.empty();
         }
@@ -132,7 +152,6 @@ public class UserServiceImpl implements UserService {
             sessionRepository.delete(session.get());
             return Optional.empty();
         }
-        User owner = session.get().getUser();
-        return Optional.of(new RegisteredUser(owner.getId(), owner.getEmail()));
+        return session;
     }
 }

@@ -15,4 +15,10 @@ public interface UserRepository extends Repository<User, Long> {
     boolean existsByEmail(String email);
 
     Optional<User> findByEmail(String email);
+
+    /**
+     * Removes the user. Callers must delete the user's sessions first — {@code sessions.user_id}
+     * is a not-null foreign key.
+     */
+    void delete(User user);
 }

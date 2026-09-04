@@ -138,6 +138,11 @@ class UserServicePropertyTest {
             public Optional<User> findByEmail(String email) {
                 return Optional.empty();
             }
+
+            @Override
+            public void delete(User user) {
+                // never reached: save() fails before anything could be deleted
+            }
         };
         UserService service = new UserServiceImpl(
                 racingRepository,

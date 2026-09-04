@@ -10,12 +10,14 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /** HTTP wiring checks for login/logout: status codes, cookie attributes, JSON contract and the static page. */
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 class SessionApiTest {
 
     private static final String PASSWORD = "Str0ng!pass";

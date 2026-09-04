@@ -35,6 +35,12 @@ final class InMemorySessionRepository implements SessionRepository {
         byToken.remove(session.getToken());
     }
 
+    @Override
+    public void deleteAllByUser(User user) {
+        // Owner identity by id, mirroring the sessions.user_id foreign key rather than object identity.
+        byToken.values().removeIf(session -> session.getUser().getId().equals(user.getId()));
+    }
+
     int size() {
         return byToken.size();
     }

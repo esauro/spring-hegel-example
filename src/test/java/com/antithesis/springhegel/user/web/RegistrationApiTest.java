@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -18,6 +19,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 /** HTTP wiring checks: status codes, JSON contract, persistence round-trip and the static page. */
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 class RegistrationApiTest {
 
     @Autowired

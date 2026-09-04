@@ -3,7 +3,7 @@ package com.antithesis.springhegel.user;
 import java.util.Optional;
 
 /**
- * Business contract for registering users and managing their login sessions.
+ * Business contract for registering users, managing their login sessions and deleting accounts.
  */
 public interface UserService {
 
@@ -45,4 +45,15 @@ public interface UserService {
      * expired tokens; an expired session encountered here is deleted. Never throws.
      */
     Optional<RegisteredUser> currentUser(String token);
+
+    /**
+     * Deletes the user who owns the live session identified by {@code token}, together with
+     * <em>all</em> of that user's sessions, in one transaction. Afterwards the email is available
+     * for registration again. {@code token} may be {@code null}.
+     *
+     * @throws NotLoggedInException if {@code token} is {@code null}, unknown, already ended or
+     *     expired (an expired session encountered here is deleted, as in {@link #currentUser}).
+     *     Nothing else is changed in that case.
+     */
+    void deleteCurrentUser(String token);
 }

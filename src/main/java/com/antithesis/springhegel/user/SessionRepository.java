@@ -15,4 +15,7 @@ public interface SessionRepository extends Repository<Session, Long> {
     Optional<Session> findByToken(String token);
 
     void delete(Session session);
+
+    /** Removes every session owned by {@code user}, whether live or expired. Used when the user is deleted. */
+    void deleteAllByUser(User user);
 }
