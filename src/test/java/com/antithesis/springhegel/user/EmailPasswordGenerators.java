@@ -30,7 +30,7 @@ public final class EmailPasswordGenerators {
     }
 
     /** Strings with the exact shape of a real session token (43 Base64-URL characters) but never issued. */
-    static Generator<String> tokensLike() {
+    public static Generator<String> tokensLike() {
         return fromRegex("[A-Za-z0-9_-]{43}").fullmatch(true);
     }
 
