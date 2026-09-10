@@ -29,7 +29,7 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
 	// Hegel: property-based testing (https://hegel.dev). Requires Java 22+;
 	// on Java 17-21 use dev.hegel:hegel-jna instead.
-	testImplementation("dev.hegel:hegel:0.5.1")
+	testImplementation("dev.hegel:hegel:0.6.0")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
