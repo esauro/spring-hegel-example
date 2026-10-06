@@ -102,6 +102,7 @@ Notes:
 4. Testing strategy (Hegel-first):
    - `RegistrationValidator` is a pure component — the bulk of the domain rules — property-tested exhaustively with Hegel generators (valid/invalid emails, policy-satisfying/violating passwords, boundary lengths 8 and 32, missing character classes, non-ASCII rejection, trim behavior).
    - `UserServiceImpl` is property-tested with a hand-rolled `InMemoryUserRepository` fake (possible because `UserRepository` is a narrow 3-method interface) and a low-strength `BCryptPasswordEncoder(4)` for speed. A fresh fake per draw eliminates the Hegel×Spring shared-state contamination risk — no Spring context in property tests at all.
+   - The concurrent-registration race is checked against the real database by a **concurrent stateful full-stack property** (`@SpringBootTest` + `MockMvcTester` + `@HegelTest`, Hegel 0.10.0 or later): `Stateful.run` with `maxConcurrency` above 1 runs the machine's `@Rule` methods on several worker threads at once, so two to four workers `POST /api/users` for the same one to three emails (in random letter case) simultaneously, and a thread-safe model checks that each email has exactly one winner (`201`) while every other attempt is a `409`. The `DataIntegrityViolationException` path is thus exercised end to end, not only through the stub of Operation 18.
    - HTTP wiring (201/400/409 mapping, JSON contract, static page presence) is covered by a plain example-based `@SpringBootTest` + `MockMvc` test — wiring, not domain logic, per project conventions.
 
 ## Structure
@@ -114,6 +115,7 @@ Notes:
 4. `InvalidRegistrationException` extends `RuntimeException`
 5. `EmailAlreadyRegisteredException` extends `RuntimeException`
 6. Test-only: `InMemoryUserRepository` implements `UserRepository`
+7. Test-only: `ConcurrentRegistrationStatefulPropertyTest` (`user.web`) holds a nested static state machine (`ConcurrentRegistrationMachine`) whose `@Rule` / `@Invariant` methods take a single `TestCase`; it reuses the package-private `UserApi` helper introduced by the self-deletion feature
 
 ### Dependencies
 
@@ -122,6 +124,7 @@ Notes:
 3. `RegistrationValidator` has no dependencies (pure component)
 4. `GlobalExceptionHandler` depends on nothing (stateless translation)
 5. `PasswordConfig` provides the `PasswordEncoder` bean
+6. `ConcurrentRegistrationStatefulPropertyTest` uses `UserApi`, `EmailPasswordGenerators.validPasswords()` / `randomizeCase()`, and Hegel's `Stateful` (with `Stateful.Options`), `Rule` (with `group` and `weight`), `Invariant` and `ConcurrentPool`
 
 ### Layered Architecture
 
@@ -152,6 +155,7 @@ Execute in this order (each step depends only on previous ones).
      - `implementation("org.springframework.boot:spring-boot-starter-data-jpa")`
      - `implementation("org.springframework.security:spring-security-crypto")`
      - `runtimeOnly("com.h2database:h2")`
+   - (Added with Operation 18b) bump `dev.hegel:hegel` from `0.6.0` to `0.10.0`, the first release with concurrent state machines (`Stateful.Options.maxConcurrency`, `Rule.group`, `ConcurrentPool`). The upgrade is source-compatible for everything this project uses; the `--enable-native-access=ALL-UNNAMED` JVM arg stays.
    - Wire coverage: `tasks.test { finalizedBy(tasks.jacocoTestReport) }`; `tasks.jacocoTestReport { dependsOn(tasks.test) }`
    - Add `tasks.jacocoTestCoverageVerification`: rule with `element = "CLASS"`, includes `com.antithesis.springhegel.user.*`, excludes `com.antithesis.springhegel.user.web.*`; two limits — `LINE` counter `COVEREDRATIO` minimum `1.0` and `BRANCH` counter `COVEREDRATIO` minimum `1.0`. Make `check` depend on `jacocoTestCoverageVerification`.
 3. Constraints: do NOT remove the existing Hegel dependency or the `--enable-native-access=ALL-UNNAMED` test JVM arg; do NOT add `spring-boot-starter-security`.
@@ -364,6 +368,22 @@ Execute in this order (each step depends only on previous ones).
 4. Example-based additions (plain `@Test`, allowed for no-input-space cases): the `DataIntegrityViolationException` race path — a stub `UserRepository` whose `existsByEmail` returns false but whose `save` throws `DataIntegrityViolationException` must yield `EmailAlreadyRegisteredException`; null email and null password each yield `InvalidRegistrationException`.
 5. Constraints: no Spring context, no shared mutable state between draws; this test plus Operation 17 must drive the `com.antithesis.springhegel.user` package to 100% line and branch coverage.
 
+### Operation 18b — Create Concurrent Stateful Hegel Property - `user.web.ConcurrentRegistrationStatefulPropertyTest`
+
+The uniqueness guarantee under contention, checked against the running application and the real H2 unique constraint. Added after the self-deletion feature (which introduced `UserApi`, the `test` profile and the sequential stateful lifecycle property); Operations 18 and 19 stay exactly as they are.
+
+1. Class: `@SpringBootTest @AutoConfigureMockMvc @ActiveProfiles("test")`; `@Autowired MockMvcTester mvc`; its own `private static final AtomicLong SEQUENCE`. One property `@HegelTest void parallelRegistrationsOfTheSameEmailHaveExactlyOneWinner(TestCase tc)`.
+2. Property body: draw `local` from `fromRegex("[a-z0-9]{1,12}").fullmatch(true)` and `candidates` from `integers().min(1).max(3)`; `suffix = "." + SEQUENCE.incrementAndGet() + "@race.test"`; the contended emails are `local + "-" + i + suffix` for `i` in `0..candidates-1` (few emails, many workers — collisions are the point). Build `new ConcurrentRegistrationMachine(new UserApi(mvc), tc, local, tails)` where `tails` are the `"-" + i + suffix` parts, run it with `Stateful.run(machine, tc, Stateful.options().minConcurrency(2).maxConcurrency(4))` — every test case is concurrent (at least two workers) and the engine draws the level up to four — then call `machine.cleanUp()`.
+3. Nested `static final class ConcurrentRegistrationMachine` — rules run on worker threads simultaneously, so every model field is thread-safe: `ConcurrentHashMap<String, Account> registered` (email → the winning `Account(email, password, id)`), a concurrent set `ids` of every id ever returned, a concurrent set `conflicts` of emails that answered `409` since they were last deleted, and `ConcurrentPool<Account> accounts` (the engine's view of the winners, so which account a later rule deletes is a drawn, shrinkable choice). Rules draw only through the `TestCase` they are handed and never keep it.
+   - `register` — `@Rule(group = "register", weight = 4)`: draw a `slot` in `0..candidates-1`, a password from `validPasswords()` and the attempted spelling `randomizeCase(tc, local) + tail`; `POST /api/users`. On `201`: `$.email` is the normalized email, the id was never seen before (`ids.add` returns true), `registered.compute(email, …)` finds **no previous winner** (two `201`s for one email without a deletion in between is the bug this property hunts) and stores the account, which is also added to `accounts`. On `409`: `$.code == "EMAIL_ALREADY_REGISTERED"`; record the email in `conflicts`. Any other status fails.
+   - `deleteAccount` — `@Rule(group = "reset")`: draw an account from `accounts.consuming()` (rejects the rule while no winner exists); `POST /api/session` with its credentials → `201`, `$.id == account.id`; `DELETE /api/users/me` with the cookie → `204`; `registered.remove(email)` must return that very account; drop the email from `conflicts`. Because the two groups never overlap, a deletion never races a registration — the race under test is registration vs registration only — and after a deletion the same email is contended again.
+   Invariants — `@Invariant` methods, run on the driving thread between rounds (never overlapping a rule):
+   - `winnersAgreeWithTheDatabase` — `accounts.size() == registered.size()`; for every contended email: if the model has a winner, `POST /api/session` with its password → `201` with `$.id == account.id` (then `DELETE /api/session` with the cookie → `204`, so the check leaves no session behind) and `POST /api/users` with the same password → `409 EMAIL_ALREADY_REGISTERED`; otherwise `POST /api/session` with a drawn valid password → `401 INVALID_CREDENTIALS`.
+   - `everyConflictHasAWinner` — every email in `conflicts` is a key of `registered`: a `409` is explained only by a `201` the model knows about.
+   - `cleanUp()` (plain method, called after `Stateful.run` returns): for every remaining winner, log in (`201`) and `DELETE /api/users/me` (`204`); then for every contended email `POST /api/session` → `401 INVALID_CREDENTIALS` — the database holds nothing for this test case.
+4. Constraints: `maxConcurrency` at most 4 (H2's default pool has 10 connections and other MockMvc tests may run in the same JVM); `minConcurrency(2)` so the property never degrades to a sequential run. No `testCases` override unless the run exceeds ~10 s locally, then `@HegelTest(testCases = 25)` and a README note. Assertions never assume an empty database; no `@DirtiesContext`, no `@Transactional`, no `@Sql`. The case-randomizer is fed only `local`, never the sequence-suffixed tail. Hibernate logs every rejected insert at WARN (`org.hibernate.orm.jdbc.error`, error code 23505) — thousands per run, all expected — so `src/test/resources/application-test.properties` raises that logger to `ERROR` with a comment saying why.
+5. README, "How the tests are shaped": after the "…and a state machine runs it again, in any order." bullet add "**…and then several of them at once.** `ConcurrentRegistrationStatefulPropertyTest` runs a state machine with `Stateful.options().minConcurrency(2).maxConcurrency(4)` (Hegel 0.10.0): two to four worker threads fire `POST /api/users` for the same handful of emails simultaneously, a `ConcurrentPool` hands the winners to a later delete rule so the race re-arms, and a thread-safe model insists on exactly one `201` per email with every other attempt a `409` — so the `DataIntegrityViolationException` fallback runs against the real unique constraint instead of a stub." In the "Example tests only where there is no input space" bullet, replace "The concurrent-registration race (`save` throwing a constraint violation), null inputs" with "The service's stubbed constraint-violation path, null inputs".
+
 ### Operation 19 — Create API Wiring Test - `RegistrationApiTest`
 
 1. Package: `com.antithesis.springhegel.user.web` under `src/test/java`
@@ -383,6 +403,7 @@ Execute in this order (each step depends only on previous ones).
 1. Run `./gradlew build` — compilation, all tests, `jacocoTestCoverageVerification` must pass.
 2. Confirm the JaCoCo rule reports 100% line and branch coverage for every class in `com.antithesis.springhegel.user` (excluding `user.web`).
 3. Manual smoke check (optional): `./gradlew bootRun`, open `http://localhost:8080/register.html`, register a user, observe the success screen; repeat with the same email, observe the conflict message.
+4. Report the wall-clock time of `ConcurrentRegistrationStatefulPropertyTest`; apply the `testCases` bound from Operation 18b.4 only if needed, and say so.
 
 ## Norms
 
@@ -392,7 +413,7 @@ Execute in this order (each step depends only on previous ones).
 4. Data Validation: domain validation lives in `RegistrationValidator` (pure, service-invoked) — not in bean-validation annotations — so Hegel properties exercise the real rules without HTTP. Validation collects all failures before reporting.
 5. Logging: no logging of password material or full request bodies anywhere; this feature introduces no logger — if one is added later it must observe that rule.
 6. Documentation Standards: Javadoc on the service interface (contract semantics, exceptions thrown) and on `RegistrationValidator`'s public methods (exact rules). Comments only for constraints code cannot express.
-7. Testing Norms: Hegel `@HegelTest` + `TestCase tc` + `tc.draw(generator, "label")` is the primary style for all domain logic; plain JUnit `@Test` only for wiring (Spring context, MockMvc) and no-input-space cases; property tests must not depend on a Spring context or shared mutable state between draws.
+7. Testing Norms: Hegel `@HegelTest` + `TestCase tc` + `tc.draw(generator, "label")` is the primary style for all domain logic; plain JUnit `@Test` only for wiring (Spring context, MockMvc) and no-input-space cases; Spring-free property tests must not depend on a Spring context or shared mutable state between draws. Full-stack properties (introduced with the self-deletion feature, extended by Operation 18b) share one `test`-profile Spring context and clean up their own, sequence-suffixed data; a concurrent state machine keeps all model state in thread-safe structures, uses `ConcurrentPool` rather than `Pool`, and draws only through the `TestCase` each rule receives.
 
 ## Safeguards
 
@@ -419,9 +440,10 @@ Execute in this order (each step depends only on previous ones).
    - `"Email is already registered"`
    - `"Request body is missing or malformed"`
 6. API Constraints: success = `201 Created` with `{"id": <number>, "email": "<normalized email>"}`; validation failure = `400` with `{"code": "VALIDATION_ERROR", "messages": [...]}`; duplicate = `409` with `{"code": "EMAIL_ALREADY_REGISTERED", "messages": ["Email is already registered"]}`.
-7. Technical Constraints: no new dependencies beyond data-jpa, h2 (runtime), security-crypto, and the jacoco plugin; entity/repository stay free of H2-specific constructs; `UserRepository` keeps its narrow 3-method contract; keep the existing Hegel test JVM configuration intact.
+7. Technical Constraints: no new dependencies beyond data-jpa, h2 (runtime), security-crypto, and the jacoco plugin, plus `dev.hegel:hegel` at `0.10.0` or later (the first release with concurrent state machines); entity/repository stay free of H2-specific constructs; `UserRepository` keeps its narrow 3-method contract; keep the existing Hegel test JVM configuration intact.
 8. Data Constraints: `users.email` unique + not null (≤ 254 chars); `users.password_hash` not null; `users.created_at` not null; only normalized emails are ever written.
 9. Coverage Constraints: `jacocoTestCoverageVerification` enforces 100% line AND branch coverage for `com.antithesis.springhegel.user` (excluding `user.web`); the build fails otherwise; domain coverage must come from Hegel property tests except the explicitly listed no-input-space example cases.
+10. Performance Constraints: `ConcurrentRegistrationStatefulPropertyTest` should finish in under ~10 s on a developer machine (BCrypt strength 4 via the `test` profile); otherwise bound it with `@HegelTest(testCases = 25)` and document it. Its concurrency never exceeds 4 workers.
 
 ## Acceptance Criteria Traceability
 
@@ -432,7 +454,7 @@ Execute in this order (each step depends only on previous ones).
 | 3 | Passwords: 8–32 chars, uppercase + lowercase + digit + ASCII special | Operation 7 (password rules); Operation 17 |
 | 4 | Users persisted in a DB (H2 for now) | Operations 1, 2, 5, 6; Operation 19 |
 | 5 | Passwords stored hashed | Operations 8, 11; Operation 18 (hash properties) |
-| 6 | Duplicate email → conflict error | Operations 4, 5 (unique constraint), 11, 13; Operations 18, 19 |
+| 6 | Duplicate email → conflict error | Operations 4, 5 (unique constraint), 11, 13; Operations 18, 18b (under real contention), 19 |
 | 7 | Success: API returns 2xx (201), page shows success screen | Operations 14, 15; Operation 19 |
 | 8 | Separation of entity code, access code, and a well-defined service interface | Operations 5, 6, 10, 11 (Structure section layering) |
 | 9 | 100% coverage of the feature's domain logic with hegel-java | Operations 1 (JaCoCo rule), 17, 18, 20 |
