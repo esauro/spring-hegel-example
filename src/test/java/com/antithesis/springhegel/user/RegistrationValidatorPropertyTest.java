@@ -9,6 +9,7 @@ import static com.antithesis.springhegel.user.EmailPasswordGenerators.controlCha
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.invalidEmails;
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.invalidPasswords;
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.malformedEmails;
+import static com.antithesis.springhegel.user.EmailPasswordGenerators.manyLabelEmails;
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.nonAsciiCharacters;
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.overlongEmails;
 import static com.antithesis.springhegel.user.EmailPasswordGenerators.passwordsWithAllClasses;
@@ -92,6 +93,22 @@ class RegistrationValidatorPropertyTest {
         List<String> errors = validator.validate(validator.normalizeEmail(email), password);
 
         assertTrue(errors.contains(EMAIL_TOO_LONG), errors.toString());
+    }
+
+    /**
+     * The email rules are evaluated on inputs of any size without recursion: an email of thousands
+     * of dotted labels yields the length message, plus the format message when it is malformed, and
+     * never a {@link StackOverflowError} (which the service would surface as a 500).
+     */
+    @HegelTest
+    void manyLabelEmailProducesTheLengthMessageWithoutOverflowing(TestCase tc) {
+        String email = tc.draw(manyLabelEmails(), "email");
+        String password = tc.draw(validPasswords(), "password");
+
+        List<String> errors = validator.validate(validator.normalizeEmail(email), password);
+
+        List<String> expected = email.endsWith("!") ? List.of(EMAIL_TOO_LONG, EMAIL_INVALID) : List.of(EMAIL_TOO_LONG);
+        assertEquals(expected, errors);
     }
 
     @HegelTest

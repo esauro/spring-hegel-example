@@ -10,15 +10,23 @@ import org.springframework.stereotype.Component;
  * Pure normalization and validation rules for registration input.
  *
  * <p>Email rule: after normalization the value must be non-blank, at most 254 characters and
- * match {@code ^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$}. Password rule: non-blank, 8–32
+ * match {@code ^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)++$}. Password rule: non-blank, 8–32
  * characters, printable ASCII only, containing at least one uppercase letter, one lowercase
  * letter, one digit and one special character from {@code !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~}.
  */
 @Component
 public class RegistrationValidator {
 
+    /**
+     * The domain-label group is non-capturing and possessive: {@code java.util.regex} matches a
+     * greedy group repetition by recursing once per repetition, so a plain {@code (...)+} overflows
+     * the stack on an email of a few thousand dotted labels. Every rule is evaluated even when the
+     * length rule already failed, so the pattern must cope with inputs of any size. The possessive
+     * form matches iteratively and accepts exactly the same strings: only {@code $} can follow the
+     * labels, so backtracking into the group could never produce a match.
+     */
     private static final Pattern EMAIL_PATTERN =
-            Pattern.compile("^[a-z0-9._%+-]+@[a-z0-9-]+(\\.[a-z0-9-]+)+$");
+            Pattern.compile("^[a-z0-9._%+-]+@[a-z0-9-]+(?:\\.[a-z0-9-]+)++$");
     private static final String UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     private static final String LOWERCASE = "abcdefghijklmnopqrstuvwxyz";
     private static final String DIGITS = "0123456789";
