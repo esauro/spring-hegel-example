@@ -126,7 +126,10 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    @Transactional
+    // NotLoggedInException is thrown after liveSession has deleted an expired session; a rollback
+    // would undo that deletion, breaking the documented "deleted, as in currentUser" behaviour.
+    // Nothing else has been changed at that point, so committing is safe.
+    @Transactional(noRollbackFor = NotLoggedInException.class)
     public void deleteCurrentUser(String token) {
         Session session = liveSession(token).orElseThrow(NotLoggedInException::new);
         User owner = session.getUser();
