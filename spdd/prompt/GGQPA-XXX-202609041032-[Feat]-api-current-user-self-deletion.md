@@ -181,12 +181,13 @@ Execute in this order; each operation lists its completion criterion.
    - if `session.get().isExpiredAt(clock.instant())` → `sessionRepository.delete(session.get())` and return empty;
    - else return `session`.
 2. Refactor `currentUser(token)` to `return liveSession(token).map(s -> new RegisteredUser(s.getUser().getId(), s.getUser().getEmail()));` — behavior-preserving (all existing login properties must still pass unchanged).
-3. Add `deleteCurrentUser(token)` — `@Transactional`:
+3. Add `deleteCurrentUser(token)` — `@Transactional(noRollbackFor = NotLoggedInException.class)`: `liveSession` deletes an expired row *before* `NotLoggedInException` is thrown, and a plain `@Transactional` would roll that deletion back (a `RuntimeException` leaving the method), silently breaking the "deleted, as in `currentUser`" clause against the real database. Nothing else has changed at that point, so committing on refusal is safe.
    - `Session session = liveSession(token).orElseThrow(NotLoggedInException::new);`
    - `User owner = session.getUser();`
    - `sessionRepository.deleteAllByUser(owner);` (every session of the owner, including the presented one)
    - `userRepository.delete(owner);`
    - Order comment: sessions must go first because of the FK; the transaction guarantees all-or-nothing.
+   - Note that the in-memory fakes of Operation 12 have no transactions and cannot detect the rollback; a `@SpringBootTest` property with a settable `Clock` bean against JPA + H2 (`ExpiredSessionDeletionOnDatabasePropertyTest`) pins the refusal-with-row-removed behaviour for both the service call and `DELETE /api/users/me`.
 4. Constraints: no logging; the token appears in no exception message; nothing is returned (no detached entity leaves the service). Every new branch (`null` token, unknown token, expired token, live token) maps to a property in Operation 12.
 
 ### Operation 6 — Update Exception Handler - `user.web.GlobalExceptionHandler`; update `ErrorResponse` Javadoc
