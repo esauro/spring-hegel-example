@@ -93,7 +93,7 @@ Notes:
    - **Trim**: `null` inputs are treated as empty; leading/trailing whitespace is stripped from both email and password.
    - **Normalize email**: lowercase the trimmed email using `Locale.ROOT` (ASCII-deterministic; locale-independent).
    - **Validate** (collect ALL failures, not fail-fast — the page can show every problem at once):
-     - Email: non-blank; at most 254 characters; after normalization must match `^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$` (pragmatic rule: dot-separated domain with at least two labels; no full RFC 5322). Non-ASCII letters survive lowercasing as non-ASCII and therefore fail the pattern — rejected by design.
+     - Email: non-blank; at most 254 characters; after normalization must match `^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)++$` (pragmatic rule: dot-separated domain with at least two labels; no full RFC 5322). Non-ASCII letters survive lowercasing as non-ASCII and therefore fail the pattern — rejected by design.
      - Password: non-blank; 8–32 characters inclusive (after trimming); every character must be printable ASCII (0x20–0x7E; interior spaces are legal but satisfy no class); must contain at least one of each: uppercase `A-Z`, lowercase `a-z`, digit `0-9`, and special character from the set `!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~` (all 32 printable ASCII non-alphanumeric, non-space characters).
    - **Reject on validation failure**: throw `InvalidRegistrationException` carrying the full message list.
    - **Uniqueness**: `existsByEmail(normalizedEmail)` → if present, throw `EmailAlreadyRegisteredException`. Additionally, a `DataIntegrityViolationException` from `save(...)` (the concurrent-registration race) is caught and rethrown as `EmailAlreadyRegisteredException` — the DB unique constraint is the true guarantee.
@@ -219,7 +219,8 @@ Execute in this order (each step depends only on previous ones).
 2. Responsibility: pure, dependency-free normalization and validation rules for registration input. This class is the heart of the domain logic and the primary Hegel target.
 3. Annotations: `@Component`
 4. Constants (private, static, final):
-   - `EMAIL_PATTERN`: compiled regex `^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$`
+   - `EMAIL_PATTERN`: compiled regex `^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)++$`
+     - The domain-label group is non-capturing and possessive (`(?:...)++`): `java.util.regex` matches a greedy group repetition by recursing once per repetition, so a plain `(...)+` throws `StackOverflowError` on an email of a few thousand dotted labels (which is over 254 characters, yet still fed to the pattern because every rule is evaluated). The possessive form matches iteratively and accepts exactly the same strings: after the labels only `$` can follow, so backtracking into the group could never produce a match anyway.
    - `SPECIAL_CHARACTERS`: the exact string `!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~`
    - `MAX_EMAIL_LENGTH = 254`, `MIN_PASSWORD_LENGTH = 8`, `MAX_PASSWORD_LENGTH = 32`
 5. Methods:
@@ -342,6 +343,7 @@ Execute in this order (each step depends only on previous ones).
    - Every invalid password produces one of the four password messages among the errors
    - Blank (whitespace-only) emails produce exactly the blank message and no other email message
    - Emails longer than 254 characters produce the length message
+   - Emails of thousands of dotted labels (5k-50k, far over 254 characters) produce exactly the length message, plus the format message when a trailing `!` makes them malformed, and never throw
    - Structurally malformed emails (missing `@`, empty local part, single-label domain, illegal characters) produce the format message
    - `normalizeEmail` is idempotent: `normalizeEmail(normalizeEmail(x)) == normalizeEmail(x)`
    - `normalizeEmail` output never has leading/trailing whitespace and never contains uppercase ASCII letters
@@ -424,7 +426,7 @@ The uniqueness guarantee under contention, checked against the running applicati
    - Do NOT add `spring-boot-starter-security`; only `spring-security-crypto`.
    - Error responses never contain stack traces, exception class names, or echoed user input.
 3. Business Rule Constraints (exact, testable definitions):
-   - Email validity: after trim + `Locale.ROOT` lowercase, must match `^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$` and be ≤ 254 characters.
+   - Email validity: after trim + `Locale.ROOT` lowercase, must match `^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)++$` and be ≤ 254 characters.
    - Password policy: after trim, length 8–32 inclusive; printable ASCII only (0x20–0x7E); at least one uppercase, one lowercase, one digit, and one of `` !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~ ``; all four classes mandatory.
    - Email identity is case-insensitive; the normalized (lowercased) form is what is stored and what uniqueness applies to.
    - Duplicate email → `409` conflict, guaranteed by the DB unique constraint (the `existsByEmail` pre-check is a UX optimization, not the guarantee).

@@ -58,6 +58,20 @@ public final class EmailPasswordGenerators {
         return oneOf(blankStrings(), malformedEmails(), overlongEmails());
     }
 
+    /**
+     * Emails whose domain has thousands of dotted labels ({@code a@b.c.c.c...}, 5k-50k labels, up to
+     * ~100 KB): far over 254 characters and, half of the time, also malformed by a trailing {@code !}.
+     * A backtracking regex recurses once per label on these, so they probe that validation stays
+     * iterative.
+     */
+    static Generator<String> manyLabelEmails() {
+        return composite(tc -> {
+            int labels = tc.draw(integers().min(5_000).max(50_000), "labels");
+            boolean malformed = tc.draw(booleans(), "malformed");
+            return "a@b" + ".c".repeat(labels) + (malformed ? "!" : "");
+        });
+    }
+
     static Generator<Character> charFrom(String alphabet) {
         return sampledFrom(alphabet.chars().mapToObj(c -> (char) c).toList());
     }
